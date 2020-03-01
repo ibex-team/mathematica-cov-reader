@@ -5,6 +5,7 @@ BeginPackage["IbexCovReader`"]
 IbexCovReader::usage = 
 	"Read an Ibex COV file.
 	The function readCovFile[filename] reads a COV file and return an association of the data contained in the COV file.
+	Indices use the Mathematica conventions, starting at 1. An indice 'a' corresponds to the indice 'a-1' in Ibex.
 	extractBoxes[cov, list] extract boxes from the Cov a list of indices.
 	extractInnerBoxes[cov] and extractNotInnerBoxes[cov] are shortcuts.
 	
@@ -22,6 +23,7 @@ IbexCovReader::usage =
 		manifoldBoundaryType,
 		nSolutions,
 		solutions(indice, parametricProof, unicityBox),
+		solutionIndices,
 		nManifoldBoundaries,
 		manifoldBoundaryIndices or manifoldBoundaryIndices(indice, parametricProof),
 		varNames,
@@ -47,10 +49,20 @@ readCovFile[filename_, levelMax_:5]:= Module[{stream, cov},
 ];
 setByteOrdering[bo_]:= byteOrdering = ByteOrdering -> bo;
 
-extractBoxes[dataset_, list_List]:= Extract[dataset["boxes"], list];
-extractBoxes[dataset_, setname_String]:= Extract[dataset["boxes"], dataset[setname]];
+extractBoxes[dataset_, list_List]:= Extract[dataset["boxes"], List/@list];
+extractBoxes[dataset_, setname_String]:= Extract[dataset["boxes"], List/@dataset[setname]];
 extractInnerBoxes[dataset_]:= extractBoxes[dataset, "innerIndices"];
-extractNotInnerBoxes[dataset_]:= Delete[dataset["boxes"], dataset["innerIndices"]];
+extractPendingBoxes[dataset_]:= extractBoxes[dataset, "pendingIndices"];
+extractBoundaryBoxes[dataset_]:= extractBoxes[dataset, "boundaryIndices"];
+extractManifoldBoundaryBoxes[dataset_]:= extractBoxes[dataset, "manifoldBoundaryIndices"]; 
+extractNotInnerBoxes[dataset_]:= Delete[dataset["boxes"], List/@dataset["innerIndices"]];
+extractUnknownBoxes[dataset_]:= Module[{
+	indicesToRemove = Join@@DeleteMissing[dataset[#]& /@ {"innerIndices", "boundaryIndices"}]},
+	Delete[dataset["boxes"], List/@indicesToRemove]
+];
+extractSummary[dataset_]:= KeyDrop[dataset, {
+	"boxes", "innerIndices", "boundaryIndices", 
+	"manifoldBoundaryIndices", "pendingIndices", "solutionIndices", "solutions", "parametricProofs"}];
 Begin["Private`"]
 
 
@@ -116,7 +128,9 @@ IbexCovReader::notAValidCovFile =
 
 
 readUInt[stream_]:= BinaryRead[stream, "UnsignedInteger32", byteOrdering];
+readIndice[stream_]:= readUInt[stream]+1;
 readUIntList[stream_, n_]:= BinaryReadList[stream, "UnsignedInteger32", n, byteOrdering];
+readIndiceList[stream_, n_]:= Table[readIndice[stream], n];
 readReal[stream_]:= BinaryRead[stream, "Real64", byteOrdering];
 readRealList[stream_, n_]:= BinaryReadList[stream, "Real64", n, byteOrdering];
 readInterval[stream_]:= Interval[readRealList[stream, 2]];
@@ -175,11 +189,11 @@ readCovOptimDataV1[stream_, dataset_]:= With[{n = dataset["n"]},
 ];
 
 readCovIUListV1[stream_, dataset_]:= With[{nInners = readUInt[stream]},
-	<| "nInners" -> nInners, "innerIndices" -> readUIntList[stream, nInners] |>
+	<| "nInners" -> nInners, "innerIndices" -> readIndiceList[stream, nInners] |>
 ];
 
 readCovIBUListV1[stream_, dataset_]:= With[{type = readUInt[stream], nBoundaries = readUInt[stream]},
-	<| "boundaryType" -> type, "boundaryTypeReadable" -> boundaryTypeMap[type], "boundaryIndices" -> readUIntList[stream, nBoundaries] |>
+	<| "boundaryType" -> type, "boundaryTypeReadable" -> boundaryTypeMap[type], "nBoundaries" -> nBoundaries, "boundaryIndices" -> readIndiceList[stream, nBoundaries] |>
 ];
 End[]
 
@@ -188,20 +202,24 @@ Begin["ManifoldV1`"]
 readUInt = Private`readUInt;
 readUIntList = Private`readUIntList;
 readBox = Private`readBox;
-readManifoldSolution[stream_, n_, nEqs_]:= Module[{},
-	If[nEqs < n,
-		<|
-			"indice" -> readUInt[stream],
-			"parametricProof" -> readUIntList[stream, n-nEqs], 
-			"unicityBox" -> readBox[stream, n]
-		|>
-		,
-		<| "indice" -> readUInt[stream], "unicityBox" -> readBox[stream, n] |>
-	]
+readIndice = Private`readIndice;
+readManifoldSolution[stream_, n_, nEqs_]:= With[{indice = readIndice[stream]},
+	solution = 
+		If[nEqs < n,
+			<|
+				"indice" -> indice,
+				"parametricProof" -> readUIntList[stream, n-nEqs], 
+				"unicityBox" -> readBox[stream, n]
+			|>
+			,
+			<| "indice" -> indice, "unicityBox" -> readBox[stream, n] |>
+		];
+	{indice, solution}
 ];
 
 readExistingSolutionSet[stream_, n_, nEqs_]:= With[{nSols = readUInt[stream]},
-	<| "nSolutions" -> nSols, "solutions" -> Table[readManifoldSolution[stream, n, nEqs], nSols] |>
+	{indices, solutions} = Transpose@Table[readManifoldSolution[stream, n, nEqs], nSols];
+	<| "nSolutions" -> nSols, "solutions" -> solutions, "solutionIndices" -> indices |>
 ];
 
 readSolutionSet[stream_, n_, nEqs_]:=With[{},
@@ -220,11 +238,11 @@ readCovManifoldV1[stream_, dataset_]:= With[{nEqs = readUInt[stream], nIneqs = r
 	|>;
 	solutionsDataset = ManifoldV1`readSolutionSet[stream, n, nEqs];
 	nBoundaries = readUInt[stream];
-	boundaryIndices = If[nEqs > 0 && nEqs < n,
-		readUIntList[stream, nBoundaries],
-		Table[<|"indice" -> readUInt[stream], "parametricProof" -> readUIntList[stream, n-nEqs] |>, nBoundaries]
+	{boundaryIndices, parametricProofs} = If[0 < nEqs < n,
+		Transpose@Table[{readIndice[stream], readUIntList[stream, n-nEqs]}, nBoundaries],
+		{readIndiceList[stream, nBoundaries], {}}
 	];
-	Join[newDataset, solutionsDataset, <| "nManifoldBoundaries" -> nBoundaries, "manifoldBoundaryIndices" -> boundaryIndices |>]
+	Join[newDataset, solutionsDataset, <| "nManifoldBoundaries" -> nBoundaries, "manifoldBoundaryIndices" -> boundaryIndices, "parametricProofs" -> parametricProofs |>]
 ];
 
 readCovSolverDataV1[stream_, dataset_]:= With[{n = dataset["n"]},
@@ -233,7 +251,7 @@ readCovSolverDataV1[stream_, dataset_]:= With[{n = dataset["n"]},
 	time = readReal[stream];
 	cells = readUInt[stream];
 	nPendings = readUInt[stream];
-	pendingIndices = readUIntList[stream, nPendings];
+	pendingIndices = readIndiceList[stream, nPendings];
 	<|
 		"varNames" -> varNames,
 		"status" -> status,
@@ -264,3 +282,6 @@ readStream[stream_, levelMax_]:= Module[{},
 End[]
 
 EndPackage[]
+
+
+
