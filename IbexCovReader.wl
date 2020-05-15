@@ -126,21 +126,33 @@ IbexCovReader::unknownFormat =
 IbexCovReader::notAValidCovFile =
 	"Stream `1` is not a valid COV stream or file.";
 
+IbexCovReader::eofReached =
+	"Unexpectedly reached EndOfFile."
 
 
-readUInt[stream_]:= BinaryRead[stream, "UnsignedInteger32", byteOrdering];
+
+checkEndOfFile[arg_List]:= If[
+	MemberQ[arg, EndOfFile],
+	Message[IbexCovReader::eofReached]; Abort[],
+	arg]
+checkEndOfFile[arg_]:= If[
+	SameQ[arg, EndOfFile],
+	Message[IbexCovReader::eofReached]; Abort[],
+	arg]
+
+readUInt[stream_]:= checkEndOfFile@BinaryRead[stream, "UnsignedInteger32", byteOrdering];
 readIndice[stream_]:= readUInt[stream]+1;
-readUIntList[stream_, n_]:= BinaryReadList[stream, "UnsignedInteger32", n, byteOrdering];
+readUIntList[stream_, n_]:= checkEndOfFile@BinaryReadList[stream, "UnsignedInteger32", n, byteOrdering];
 readIndiceList[stream_, n_]:= Table[readIndice[stream], n];
-readReal[stream_]:= BinaryRead[stream, "Real64", byteOrdering];
-readRealList[stream_, n_]:= BinaryReadList[stream, "Real64", n, byteOrdering];
+readReal[stream_]:= checkEndOfFile@BinaryRead[stream, "Real64", byteOrdering];
+readRealList[stream_, n_]:= checkEndOfFile@BinaryReadList[stream, "Real64", n, byteOrdering];
 readInterval[stream_]:= Interval[readRealList[stream, 2]];
 readBox[stream_, n_]:= Interval /@ Partition[readRealList[stream, 2*n], 2];
 readBoxList[stream_, n_, nBoxes_]:= Table[readBox[stream, n], nBoxes];
-readNullTerminatedString[stream_]:= ExportString[ReadByteArray[stream, ByteArray[{0}]],"Character8"];
+readNullTerminatedString[stream_]:= ExportString[checkEndOfFile@ReadByteArray[stream, ByteArray[{0}]],"Character8"];
 
 (* We drop the last character (null character) to be able to compare with Mma string, that do not terminate with a null character *)
-readSignature[stream_]:= ExportString[Drop[BinaryReadList[stream, "Character8", 20], -1], "Character8"];
+readSignature[stream_]:= ExportString[Drop[checkEndOfFile@BinaryReadList[stream, "Character8", 20], -1], "Character8"];
 
 checkSignature[signature_String]:= signature == "IBEX COVERING FILE ";
 
