@@ -74,7 +74,8 @@ solverStatusMap = <|
 	1 -> "CompleteSearchInfeasible",
 	2 -> "IncompleteSearchMinimalWidth",
 	3 -> "IncompleteSearchTimeout",
-	4 -> "IncompleteSearchBufferOverflow"
+	4 -> "IncompleteSearchBufferOverflow",
+	5 -> "IncompleteSearchUserBreak"
 |>;
 
 boundaryTypeMap = <|
@@ -107,7 +108,7 @@ formatMapL1 = <| {0,1} -> readCovListV1 |>;
 formatMapL2 = <| {0,1} -> readCovIUListV1, {1,1} -> readCovOptimDataV1 |>;
 formatMapL3 = <| {0,1} -> readCovIBUListV1 |>;
 formatMapL4 = <| {0,1} -> readCovManifoldV1 |>;
-formatMapL5 = <| {0,1} -> readCovSolverDataV1 |>;
+formatMapL5 = <| {0,1} -> readCovSolverDataV1toV2, {0,2} -> readCovSolverDataV1toV2 |>;
 formatMap = <|
 	0 -> formatMapL0,
 	1 -> formatMapL1,
@@ -217,8 +218,10 @@ readManifoldSolution[stream_, n_, nEqs_]:= With[{indice = readIndice[stream]},
 	{indice, solution}
 ];
 
-readExistingSolutionSet[stream_, n_, nEqs_]:= With[{nSols = readUInt[stream]},
-	{indices, solutions} = Transpose@Table[readManifoldSolution[stream, n, nEqs], nSols];
+readExistingSolutionSet[stream_, n_, nEqs_]:= Module[{
+	nSols = readUInt[stream], ms},
+	ms = Table[readManifoldSolution[stream, n, nEqs], nSols];
+	{indices, solutions} = Transpose@ms;
 	<| "nSolutions" -> nSols, "solutions" -> solutions, "solutionIndices" -> indices |>
 ];
 
@@ -238,14 +241,16 @@ readCovManifoldV1[stream_, dataset_]:= With[{nEqs = readUInt[stream], nIneqs = r
 	|>;
 	solutionsDataset = ManifoldV1`readSolutionSet[stream, n, nEqs];
 	nBoundaries = readUInt[stream];
-	{boundaryIndices, parametricProofs} = If[0 < nEqs < n,
-		Transpose@Table[{readIndice[stream], readUIntList[stream, n-nEqs]}, nBoundaries],
-		{readIndiceList[stream, nBoundaries], {}}
+	{boundaryIndices, parametricProofs} = If[nBoundaries == 0, {{}, {}},
+		If[0 < nEqs < n,
+			Transpose@Table[{readIndice[stream], readUIntList[stream, n-nEqs]}, nBoundaries],
+			{readIndiceList[stream, nBoundaries], {}}
+		]
 	];
 	Join[newDataset, solutionsDataset, <| "nManifoldBoundaries" -> nBoundaries, "manifoldBoundaryIndices" -> boundaryIndices, "parametricProofs" -> parametricProofs |>]
 ];
 
-readCovSolverDataV1[stream_, dataset_]:= With[{n = dataset["n"]},
+readCovSolverDataV1toV2[stream_, dataset_]:= With[{n = dataset["n"]},
 	varNames = Table[readNullTerminatedString[stream], n];
 	status = readUInt[stream];
 	time = readReal[stream];
