@@ -7,7 +7,21 @@ IbexCovReader::usage =
 	The function readCovFile[filename] reads a COV file and return an association of the data contained in the COV file.
 	Indices use the Mathematica conventions, starting at 1. An indice 'a' corresponds to the indice 'a-1' in Ibex.
 	extractBoxes[cov, list] extract boxes from the Cov a list of indices.
-	extractInnerBoxes[cov] and extractNotInnerBoxes[cov] are shortcuts.
+	List of public functions:
+		readCovFile[file, formatMaxLevel:5],
+		extractBoxes[cov, indicesList],
+		extractBoxes[cov, keyName] (e.g. 'solutionIndices'),
+		extractInnerBoxes[cov],
+		extractPendingBoxes[cov],
+		extractBoundaryBoxes[cov],
+		extractManifoldBoundaryBoxes[cov],
+		extractNotInnerBoxes[cov],
+		extractUnknownBoxes[cov],
+		extractSolutions[cov],
+		extractSolutionBoxes[cov],
+		extractUnicityBoxes[cov],
+		extractSummary[cov],
+		setByteOrdering[$ByteOrdering].
 	
 	List of keys in the Cov (their presence depends on the format of the file and problem caracteristics):
 		n,
@@ -41,16 +55,20 @@ IbexCovReader::usage =
 		feasiblePoint.
 ";
 
+readCovFile::usage = "Read a Cov file to the maximum specified depth (default 5).";
 readCovFile[filename_, levelMax_:5]:= Module[{stream, cov},
 	stream = OpenRead[filename, BinaryFormat->True];
 	cov = Private`readStream[stream, levelMax];
 	Close[stream];
 	cov
 ];
+setByteOrdering::usage = "Set the byte ordering when reading a Cov file (default -1, little endian).";
 setByteOrdering[bo_]:= byteOrdering = ByteOrdering -> bo;
 
+extractBoxes::usage = "Extract boxes from the Cov, either with a list of indices, or the name of a list of indices in the Cov.";
 extractBoxes[dataset_, list_List]:= Extract[dataset["boxes"], List/@list];
 extractBoxes[dataset_, setname_String]:= Extract[dataset["boxes"], List/@dataset[setname]];
+
 extractInnerBoxes[dataset_]:= extractBoxes[dataset, "innerIndices"];
 extractPendingBoxes[dataset_]:= extractBoxes[dataset, "pendingIndices"];
 extractBoundaryBoxes[dataset_]:= extractBoxes[dataset, "boundaryIndices"];
@@ -60,6 +78,9 @@ extractUnknownBoxes[dataset_]:= Module[{
 	indicesToRemove = Join@@DeleteMissing[dataset[#]& /@ {"innerIndices", "boundaryIndices"}]},
 	Delete[dataset["boxes"], List/@indicesToRemove]
 ];
+extractSolutions[dataset_]:= dataset["solutions"];
+extractUnicityBoxes[dataset_]:= #["unicityBox"]&/@cov["solutions"];
+extractSolutionBoxes[dataset_]:= extractBoxes[dataset, "solutionIndices"];
 extractSummary[dataset_]:= KeyDrop[dataset, {
 	"boxes", "innerIndices", "boundaryIndices", 
 	"manifoldBoundaryIndices", "pendingIndices", "solutionIndices", "solutions", "parametricProofs"}];
@@ -151,6 +172,7 @@ readBox[stream_, n_]:= Interval /@ Partition[readRealList[stream, 2*n], 2];
 readBoxList[stream_, n_, nBoxes_]:= Table[readBox[stream, n], nBoxes];
 (*readNullTerminatedString[stream_]:= ExportString[checkEndOfFile@ReadByteArray[stream, ByteArray[{0}]],"Character8"];*)
 readNullTerminatedString[stream_]:= checkEndOfFile@BinaryRead[stream, "TerminatedString"];
+
 (* We drop the last character (null character) to be able to compare with Mma string, that do not terminate with a null character *)
 readSignature[stream_]:= ExportString[Drop[checkEndOfFile@BinaryReadList[stream, "Character8", 20], -1], "Character8"];
 
