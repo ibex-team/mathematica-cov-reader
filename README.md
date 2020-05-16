@@ -9,4 +9,9 @@ cov = readCovFile["file.cov"]
 ```
 
 The function `readCovFile` returns an association containing the data associated to the COV.
-For example, to retrieve boxes, type `cov["boxes"]`.
+
+You can see other utility functions with
+```
+IbexCovReader::usage
+```
+
