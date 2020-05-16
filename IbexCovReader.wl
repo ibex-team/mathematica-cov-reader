@@ -149,8 +149,8 @@ readRealList[stream_, n_]:= checkEndOfFile@BinaryReadList[stream, "Real64", n, b
 readInterval[stream_]:= Interval[readRealList[stream, 2]];
 readBox[stream_, n_]:= Interval /@ Partition[readRealList[stream, 2*n], 2];
 readBoxList[stream_, n_, nBoxes_]:= Table[readBox[stream, n], nBoxes];
-readNullTerminatedString[stream_]:= ExportString[checkEndOfFile@ReadByteArray[stream, ByteArray[{0}]],"Character8"];
-
+(*readNullTerminatedString[stream_]:= ExportString[checkEndOfFile@ReadByteArray[stream, ByteArray[{0}]],"Character8"];*)
+readNullTerminatedString[stream_]:= checkEndOfFile@BinaryRead[stream, "TerminatedString"];
 (* We drop the last character (null character) to be able to compare with Mma string, that do not terminate with a null character *)
 readSignature[stream_]:= ExportString[Drop[checkEndOfFile@BinaryReadList[stream, "Character8", 20], -1], "Character8"];
 
